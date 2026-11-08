@@ -1,4 +1,4 @@
-name: DNSrecon Python CI
+name: DNSrecon CI
 
 on:
   push:
@@ -8,32 +8,65 @@ on:
   pull_request:
     branches:
     - '*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   Python:
-    runs-on: ubuntu-latest
+    name: Python (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # pushes ruff fixes back to the branch
     strategy:
-      max-parallel: 4
+      max-parallel: 8
       matrix:
-        python-version: [3.6, 3.7, 3.8, 3.9]
+        os: [ubuntu-latest]
+        python-version: [3.12, 3.13, 3.14]
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2.3.1
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
+        egress-policy: audit
 
-    - name: Lint with flake8
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: uv sync --extra dev
+
+    - name: Lint with ruff
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero  --max-line-length=127 --statistics
-    
+        uv run ruff check --fix
+
+    - name: Format with ruff
+      run: |
+        uv run ruff format
+
+    - name: Commit changes for ruff formating and linting
+      if: github.event_name == 'push'
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git add .
+        git commit -m "Apply ruff fixes and formatting" || true # Use || true to prevent failure if no changes
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${REF_NAME}"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REF_NAME: ${{ github.ref_name }}
+
     - name: Test with pytest
       run: |
-        python3 -m pytest .
+        uv run pytest

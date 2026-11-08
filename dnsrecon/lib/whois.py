@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 #    Copyright (C) 2010  Carlos Perez
 #
 #    This program is free software; you can redistribute it and/or modify
@@ -15,9 +13,11 @@
 #    along with this program; if not, write to the Free Software
 #    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import ipaddress
 import re
-from netaddr import *
 import socket
+
+__name__ = 'whois.py'
 
 WHOIS_PORT_NUMBER = 43
 WHOIS_RECEIVE_BUFFER_SIZE = 4096
@@ -26,19 +26,16 @@ WHOIS_RECEIVE_BUFFER_SIZE = 4096
 def get_whois(ip_addrs):
     """
     Function that returns what whois server is the one to be queried for
-    registration information, returns whois.arin.net is not in database, returns
+    registration information, returns whois.arin.net if not in database, returns
     None if private.
     """
     whois_server = None
-    ip = IPAddress(ip_addrs)
-    info_of_ip = ip.info
-    if ip.version == 4 and ip.is_private() is False:
-        for i in info_of_ip['IPv4']:
-            whois_server = i['whois']
-            if len(whois_server) == 0 and i['status'] != "Reserved":
-                whois_server = "whois.arin.net"
-            elif len(whois_server) == 0:
-                whois_server = None
+    try:
+        ip = ipaddress.ip_address(ip_addrs)
+        if isinstance(ip, ipaddress.IPv4Address) and not ip.is_private:
+            whois_server = 'whois.arin.net'
+    except ValueError:
+        whois_server = None
 
     return whois_server
 
@@ -48,21 +45,23 @@ def whois(target, whois_srv):
     Performs a whois query against a arin.net for a given IP, Domain or Host as a
     string and returns the answer of the query.
     """
-    response = ""
+    response = ''
     counter = 1
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((whois_srv, WHOIS_PORT_NUMBER))
-        if whois_srv == "whois.arin.net":
-            s.send(("n " + target + "\r\n").encode("utf-8"))
+        if whois_srv == 'whois.arin.net':
+            s.send(('n ' + target + '\r\n').encode('utf-8'))
         else:
-            s.send((target + "\r\n").encode("utf-8"))
+            s.send((target + '\r\n').encode('utf-8'))
         response = ''
         while True:
             d = s.recv(WHOIS_RECEIVE_BUFFER_SIZE)
-            response += str(d)
+            if not d:
+                break
+            response += d.decode('utf-8')
             counter += 1
-            if str(d) == '' or counter == 5:
+            if counter == 5:
                 break
         s.close()
     except Exception as e:
@@ -84,12 +83,12 @@ def get_whois_nets(data):
 
 
 def get_whois_orgname(data):
-    org_pattern = r"OrgName\:\s*(.*)\n"
+    org_pattern = r'OrgName\:\s*(.*)\n'
     result = re.findall(org_pattern, data)
-    # Lets try RIPENET Format
+    # Let's try RIPENET Format
     if not result:
-        org_pattern = r"netname\:\s*(.*)\n"
+        org_pattern = r'netname\:\s*(.*)\n'
         result = re.findall(org_pattern, data)
     if not result:
-        result.append("Not Found")
+        result.append('Not Found')
     return result
